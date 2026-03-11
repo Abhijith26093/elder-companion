@@ -6,7 +6,9 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'services/notification_service.dart';
 
 class AddMedicineScreen extends StatefulWidget {
-  const AddMedicineScreen({super.key});
+  final String? targetElderId;
+
+  const AddMedicineScreen({super.key, this.targetElderId});
 
   @override
   State<AddMedicineScreen> createState() => _AddMedicineScreenState();
@@ -18,10 +20,12 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
   final _nameController = TextEditingController();
   final _dosageController = TextEditingController();
   final _notesController = TextEditingController();
-  
+
   TimeOfDay? _selectedTime;
   String? _editingDocId;
   int? _editingNotificationId;
+  List<int> _selectedDays = [1, 2, 3, 4, 5, 6, 7];
+  final List<String> _weekDays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
   final user = FirebaseAuth.instance.currentUser;
 
@@ -40,14 +44,15 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
   Future<void> _saveMedicine() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedTime == null) {
-         ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a time')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please select a time')));
       return;
     }
-    if (user == null) {
+    final elderIdToUse = widget.targetElderId ?? user?.uid;
+    if (elderIdToUse == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User not logged in!')),
+        const SnackBar(content: Text('Cannot determine Elder ID!')),
       );
       return;
     }
@@ -67,23 +72,26 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
       scheduledDateTime = scheduledDateTime.add(const Duration(days: 1));
     }
 
-    int notificationId = _editingNotificationId ?? (DateTime.now().millisecondsSinceEpoch ~/ 1000);
-    notificationId = notificationId & 0x7FFFFFFF;
+    int notificationId =
+        _editingNotificationId ??
+        ((DateTime.now().millisecondsSinceEpoch ~/ 1000) % 100000000); // keep it small enough to add +7 without overflow
 
     try {
-      // If editing, cancel the old notification first (to be clean, though overwriting same ID works if ID reused)
-      // Actually if we reuse ID, zonedSchedule overwrites. But let's be safe.
-      if (_editingDocId != null) {
-           await NotificationService().cancelNotification(notificationId);
+      if (_editingDocId != null && _editingNotificationId != null) {
+        for (int i = 1; i <= 7; i++) {
+          await NotificationService().cancelNotification(_editingNotificationId! + i);
+        }
+        await NotificationService().cancelNotification(_editingNotificationId!);
       }
 
       final medicineData = {
-        'elderId': user!.uid,
+        'elderId': elderIdToUse,
         'medicineName': _nameController.text.trim(),
         'dosage': _dosageController.text.trim(),
         'time': _selectedTime!.format(context),
         'hour': _selectedTime!.hour,
         'minute': _selectedTime!.minute,
+        'selectedDays': _selectedDays,
         'notes': _notesController.text.trim(),
         'notificationId': notificationId,
         'createdAt': FieldValue.serverTimestamp(),
@@ -95,27 +103,48 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
             .doc(_editingDocId)
             .update(medicineData);
       } else {
-        await FirebaseFirestore.instance.collection('medicines').add(medicineData);
+        await FirebaseFirestore.instance
+            .collection('medicines')
+            .add(medicineData);
       }
 
-       // Schedule Daily Notification
-      await NotificationService().scheduleNotification(
-        id: notificationId,
-        title: "Medicine Time!",
-        body: "Please take ${_nameController.text} (${_dosageController.text})",
-        scheduledTime: scheduledDateTime,
-        matchDateTimeComponents: DateTimeComponents.time, // Daily
-      );
+      // Schedule notifications for each selected day
+      if (widget.targetElderId == null) {
+        for (int day in _selectedDays) {
+          int daysUntil = day - now.weekday;
+          DateTime scheduleForDay = DateTime(
+            now.year, now.month, now.day, _selectedTime!.hour, _selectedTime!.minute
+          );
+
+          if (daysUntil < 0 || (daysUntil == 0 && scheduleForDay.isBefore(now))) {
+            daysUntil += 7; // Next week
+          }
+          
+          scheduleForDay = scheduleForDay.add(Duration(days: daysUntil));
+
+          await NotificationService().scheduleNotification(
+            id: notificationId + day,
+            title: "Medicine Time!",
+            body: "Please take ${_nameController.text} (${_dosageController.text})",
+            scheduledTime: scheduleForDay,
+            matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime, 
+          );
+        }
+      }
 
       _resetForm();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_editingDocId != null ? 'Medicine Updated' : 'Medicine Added')),
+        SnackBar(
+          content: Text(
+            _editingDocId != null ? 'Medicine Updated' : 'Medicine Added',
+          ),
+        ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving medicine: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error saving medicine: $e')));
     }
   }
 
@@ -124,43 +153,59 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
     _dosageController.clear();
     _notesController.clear();
     setState(() {
-        _selectedTime = null;
-        _editingDocId = null;
-        _editingNotificationId = null;
+      _selectedTime = null;
+      _selectedDays = [1, 2, 3, 4, 5, 6, 7];
+      _editingDocId = null;
+      _editingNotificationId = null;
     });
   }
 
   Future<void> _deleteMedicine(String docId, int? notificationId) async {
-      await FirebaseFirestore.instance.collection('medicines').doc(docId).delete();
-      if (notificationId != null) {
-          await NotificationService().cancelNotification(notificationId);
+    await FirebaseFirestore.instance
+        .collection('medicines')
+        .doc(docId)
+        .delete();
+    // Only cancel local notification if we are the elder (we scheduled it)
+    if (notificationId != null && widget.targetElderId == null) {
+      for (int i = 1; i <= 7; i++) {
+        await NotificationService().cancelNotification(notificationId + i);
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Medicine deleted')),
-      );
+      await NotificationService().cancelNotification(notificationId);
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Medicine deleted')));
   }
 
   void _startEdit(Map<String, dynamic> data, String docId) {
-      setState(() {
-          _editingDocId = docId;
-          _nameController.text = data['medicineName'];
-          _dosageController.text = data['dosage'];
-          _notesController.text = data['notes'] ?? '';
-          _editingNotificationId = data['notificationId'];
-          
-          if (data['hour'] != null && data['minute'] != null) {
-              _selectedTime = TimeOfDay(hour: data['hour'], minute: data['minute']);
-          } else {
-              // Fallback if legacy data doesn't have hour/minute
-              _selectedTime = null; 
-          }
-      });
+    setState(() {
+      _editingDocId = docId;
+      _nameController.text = data['medicineName'];
+      _dosageController.text = data['dosage'];
+      _notesController.text = data['notes'] ?? '';
+      _editingNotificationId = data['notificationId'];
+
+      if (data['selectedDays'] != null) {
+        _selectedDays = List<int>.from(data['selectedDays']);
+      } else {
+        _selectedDays = [1, 2, 3, 4, 5, 6, 7];
+      }
+
+      if (data['hour'] != null && data['minute'] != null) {
+        _selectedTime = TimeOfDay(hour: data['hour'], minute: data['minute']);
+      } else {
+        // Fallback if legacy data doesn't have hour/minute
+        _selectedTime = null;
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_editingDocId != null ? 'Edit Medicine' : 'Add Medicine')),
+      appBar: AppBar(
+        title: Text(_editingDocId != null ? 'Edit Medicine' : 'Add Medicine'),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -172,47 +217,90 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
                 children: [
                   TextFormField(
                     controller: _nameController,
-                    decoration:
-                        const InputDecoration(labelText: 'Medicine Name'),
+                    decoration: const InputDecoration(
+                      labelText: 'Medicine Name',
+                    ),
                     validator: (v) => v!.isEmpty ? 'Required' : null,
                   ),
                   const SizedBox(height: 10),
                   TextFormField(
                     controller: _dosageController,
-                    decoration:
-                        const InputDecoration(labelText: 'Dosage (e.g. 500mg)'),
+                    decoration: const InputDecoration(
+                      labelText: 'Dosage (e.g. 500mg)',
+                    ),
                     validator: (v) => v!.isEmpty ? 'Required' : null,
                   ),
                   const SizedBox(height: 10),
-                  
+
                   // Time Picker Button
                   SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed: () => _selectTime(context),
-                        child: Text(_selectedTime == null 
-                            ? 'Select Time (Daily)' 
-                            : 'Time: ${_selectedTime!.format(context)}'),
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () => _selectTime(context),
+                      child: Text(
+                        _selectedTime == null
+                            ? 'Select Time'
+                            : 'Time: ${_selectedTime!.format(context)}',
                       ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Select Days:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 4.0,
+                    children: List.generate(7, (index) {
+                      int dayNum = index + 1; // 1 = Monday, 7 = Sunday
+                      return FilterChip(
+                        label: Text(_weekDays[index], style: const TextStyle(fontSize: 12)),
+                        selected: _selectedDays.contains(dayNum),
+                        onSelected: (bool selected) {
+                          setState(() {
+                            if (selected) {
+                              _selectedDays.add(dayNum);
+                              _selectedDays.sort();
+                            } else {
+                              if (_selectedDays.length > 1) { // Ensure at least 1 day is selected
+                                _selectedDays.remove(dayNum);
+                              }
+                            }
+                          });
+                        },
+                      );
+                    }),
                   ),
 
                   const SizedBox(height: 10),
                   TextFormField(
                     controller: _notesController,
-                    decoration:
-                        const InputDecoration(labelText: 'Notes (optional)'),
+                    decoration: const InputDecoration(
+                      labelText: 'Notes (optional)',
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Row(
                     children: [
-                        if (_editingDocId != null) 
-                            Expanded(child: TextButton(onPressed: _resetForm, child: const Text("Cancel Edit"))),
+                      if (_editingDocId != null)
                         Expanded(
-                            child: ElevatedButton(
-                            onPressed: _saveMedicine,
-                            child: Text(_editingDocId != null ? 'Update Medicine' : 'Save Medicine'),
-                            ),
+                          child: TextButton(
+                            onPressed: _resetForm,
+                            child: const Text("Cancel Edit"),
+                          ),
                         ),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _saveMedicine,
+                          child: Text(
+                            _editingDocId != null
+                                ? 'Update Medicine'
+                                : 'Save Medicine',
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -236,59 +324,68 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('medicines')
-                    .where('elderId', isEqualTo: user?.uid)
+                    .where('elderId', isEqualTo: widget.targetElderId ?? user?.uid)
                     .snapshots(),
                 builder: (context, snapshot) {
-                  if (snapshot.connectionState ==
-                      ConnectionState.waiting) {
-                    return const Center(
-                        child: CircularProgressIndicator());
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
                   }
 
-                  if (!snapshot.hasData ||
-                      snapshot.data!.docs.isEmpty) {
-                    return const Center(
-                        child: Text('No medicines added yet'));
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    return const Center(child: Text('No medicines added yet'));
                   }
 
                   final docs = snapshot.data!.docs;
                   docs.sort((a, b) {
-                      final aTime = (a.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
-                      final bTime = (b.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
-                      if (aTime == null || bTime == null) return 0;
-                      return bTime.compareTo(aTime);
+                    final aTime =
+                        (a.data() as Map<String, dynamic>)['createdAt']
+                            as Timestamp?;
+                    final bTime =
+                        (b.data() as Map<String, dynamic>)['createdAt']
+                            as Timestamp?;
+                    if (aTime == null || bTime == null) return 0;
+                    return bTime.compareTo(aTime);
                   });
 
                   return ListView(
                     children: docs.map((doc) {
-                      final data =
-                          doc.data() as Map<String, dynamic>;
+                      final data = doc.data() as Map<String, dynamic>;
                       final docId = doc.id;
 
                       return Card(
                         child: ListTile(
-                          leading:
-                              const Icon(Icons.medication_outlined, color: Colors.teal),
+                          leading: const Icon(
+                            Icons.medication_outlined,
+                            color: Colors.teal,
+                          ),
                           title: Text(data['medicineName']),
-                          subtitle: Text(
-                              '${data['dosage']} • ${data['time']}'),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${data['dosage']} • ${data['time']}'),
+                              Text(
+                                _getDaysString(List<int>.from(data['selectedDays'] ?? [1,2,3,4,5,6,7])),
+                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                              ),
+                            ],
+                          ),
                           trailing: PopupMenuButton<String>(
                             onSelected: (value) {
-                                if (value == 'edit') {
-                                    _startEdit(data, docId);
-                                } else if (value == 'delete') {
-                                    _deleteMedicine(docId, data['notificationId']);
-                                }
+                              if (value == 'edit') {
+                                _startEdit(data, docId);
+                              } else if (value == 'delete') {
+                                _deleteMedicine(docId, data['notificationId']);
+                              }
                             },
                             itemBuilder: (context) => [
-                                const PopupMenuItem(
-                                    value: 'edit',
-                                    child: Text('Edit'),
-                                ),
-                                const PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('Delete'),
-                                ),
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Text('Edit'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Text('Delete'),
+                              ),
                             ],
                           ),
                         ),
@@ -302,5 +399,11 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
         ),
       ),
     );
+  }
+
+  String _getDaysString(List<int> days) {
+    if (days.length == 7) return "Every day";
+    List<String> d = days.map((day) => _weekDays[day-1]).toList();
+    return d.join(', ');
   }
 }
