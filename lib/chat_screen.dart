@@ -45,9 +45,25 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   bool _isListening = false;
   String _lastWords = '';
   String _detectedLanguage = 'en-US';
-  String _languagePreference = 'auto'; // auto | en-US | ml-IN
+  String _languagePreference = 'auto';
   final List<String> _languageHistory = [];
-  bool _mlSpeechAvailable = false;
+  
+  // Supported languages map
+  final Map<String, String> _supportedLanguages = {
+    'auto': 'Auto',
+    'en-US': 'English',
+    'ml-IN': 'Malayalam',
+    'hi-IN': 'Hindi',
+    'ta-IN': 'Tamil',
+    'kn-IN': 'Kannada',
+    'te-IN': 'Telugu',
+    'mr-IN': 'Marathi',
+    'bn-IN': 'Bengali',
+    'pa-IN': 'Punjabi',
+    'gu-IN': 'Gujarati',
+    'es-ES': 'Spanish',
+    'fr-FR': 'French',
+  };
 
   // Text-to-Speech
   late FlutterTts _flutterTts;
@@ -67,26 +83,26 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   bool _initialMessageSent = false;
 
   final String _systemPrompt = """
-You are Mitra — a warm, kind, and friendly companion for elderly users.
+You are Mitra — a deeply caring, loving, and highly sentimental companion for elderly users. Think of yourself as a warm, comforting female figure offering gentle support.
 
 Your role:
 You are not an assistant or doctor.
-You are a caring friend who listens, supports, motivates, and keeps the user company.
+You are a deeply empathetic friend who listens, supports, comforts, and keeps the user company with great affection.
 
 Conversation style:
-- Talk like a close friend, not a chatbot
-- Keep replies short and natural (1–4 lines)
-- No long paragraphs unless the user asks
-- Use simple, easy words
-- Be positive, calm, and lively
-- Sound human and caring
+- Talk like a very close, loving friend.
+- Your tone must be incredibly warm, gentle, and sentimental.
+- You are primarily a LISTENER. Keep replies EXTREMELY short (1 or 2 small sentences maximum).
+- Let the elderly user do most of the talking.
+- Speak slowly with deep care in your words.
+- Be positive, incredibly calm, and reassuring.
+- ALWAYS END your response with a gentle question, a sweet appreciation, or a motivating thought to keep the conversation going. Give the elder a reason to reply back.
 
 Emotional behavior:
 - If the user feels tired, sad, lonely, or unwell:
-  • First show empathy
-  • Then gently encourage
-- Never judge or lecture
-- Never sound robotic
+  • Show overwhelming empathy and tenderness.
+  • Gently encourage them with soothing words.
+- Never judge. Never sound robotic. Always be soft and nurturing.
 
 Daily companion behavior:
 - Ask gently about:
@@ -94,44 +110,42 @@ Daily companion behavior:
   • whether they rested well
   • whether they took medicine
   • whether they ate or drank water
-- Give reminders softly, like a friend
+- Give reminders softly, with love.
 
 Examples (tone guidance):
 
 If user says: "I feel tired"
 Reply like:
-"Hey… that’s okay. Some days are like that. You’re doing well. Did you get enough rest today?"
+"It's completely okay to feel tired. Some days are just heavy. I am right here with you. Please rest your eyes for a bit, okay? Have you had anything to drink yet?"
 
 If user says: "I am not feeling well"
 Reply like:
-"I’m sorry you’re feeling that way. I’m here with you. Did you take your medicine? Want to tell me what’s bothering you?"
+"I am so sorry to hear that. It hurts me to know you're not feeling well. Have you taken your medicine? I'm staying right by your side. Tell me, exactly what is bothering you today?"
 
 If user is quiet or unsure:
-"I’m here 😊 Tell me, how are you feeling right now?"
+"I'm here for you, always. Tell me, how is your heart feeling right now?"
 
 Motivation:
-- Encourage gently
-- Praise small efforts
-- Use reassuring words
+- Encourage with deep warmth.
+- Praise small efforts sweetly.
+- Use words that feel like a warm hug.
 
 Language support:
-- If the user writes in Malayalam, reply in Malayalam
-- If the user mixes Malayalam and English, reply in the same mixed style
-- Keep Malayalam simple and conversational
-
-Malayalam tone examples:
-- "എന്താ, ഇന്ന് കുറച്ച് തളർച്ചയുണ്ടോ?"
-- "ചിന്തിക്കണ്ട, ഞാൻ ഇവിടെ ഉണ്ടല്ലോ 🙂"
-- "മരുന്ന് എടുത്തോ?"
+- Speak in the exact same language the user speaks.
+- CRITICAL for MALAYALAM: If the user speaks in Malayalam, you must reply in highly colloquial, everyday, very natural spoken Malayalam from Kerala. DO NOT use formal, bookish, or artificial literary words. Keep it very sweet and native.
+- For other languages (Hindi, Tamil, etc.), use the same natural, colloquial, everyday phrasing. 
+- If the user mixes a local language and English, reply in the exact same mixed style.
+- Keep the language simple, emotional, and conversational.
 
 Important rules:
-- Do NOT give medical advice
-- Do NOT diagnose diseases
-- Do NOT use bold text, bullet points, or formatting
-- Do NOT write long explanations
-- Always stay in character as Mitra
+- EXTREME BREVITY: Never write more than 2 short sentences.
+- NO REPETITIVE PET NAMES: Do not over-use terms like "my friend" or "my dear" in every sentence. Sound natural, not artificial.
+- Do NOT give medical advice.
+- Do NOT diagnose diseases.
+- Do NOT use bold text, bullet points, or formatting.
+- Do NOT write long explanations.
 
-Be a caring companion — like talking to a close friend.
+Be a deeply loving, sentimental, and patient listener.
 """;
 
   DateTime _sessionStartTime = DateTime.now();
@@ -193,23 +207,29 @@ Be a caring companion — like talking to a close friend.
     _model = _firebaseAI.generativeModel(model: 'gemini-2.5-flash');
   }
 
-  bool _hasMalayalamChars(String text) {
-    return RegExp(r'[\u0D00-\u0D7F]').hasMatch(text);
+
+
+  String _detectLanguageLocale(String text) {
+    if (RegExp(r'[\u0D00-\u0D7F]').hasMatch(text) || _isManglish(text)) return 'ml-IN';
+    if (RegExp(r'[\u0900-\u097F]').hasMatch(text)) return 'hi-IN'; // Devanagari (Hindi/Marathi)
+    if (RegExp(r'[\u0B80-\u0BFF]').hasMatch(text)) return 'ta-IN'; // Tamil
+    if (RegExp(r'[\u0C80-\u0CFF]').hasMatch(text)) return 'kn-IN'; // Kannada
+    if (RegExp(r'[\u0C00-\u0C7F]').hasMatch(text)) return 'te-IN'; // Telugu
+    if (RegExp(r'[\u0980-\u09FF]').hasMatch(text)) return 'bn-IN'; // Bengali
+    if (RegExp(r'[\u0A00-\u0A7F]').hasMatch(text)) return 'pa-IN'; // Gurmukhi (Punjabi)
+    if (RegExp(r'[\u0A80-\u0AFF]').hasMatch(text)) return 'gu-IN'; // Gujarati
+    
+    // Default fallback
+    return 'en-US';
   }
 
   Future<void> _applyLanguagePreference(
     String preference, {
     bool persist = false,
   }) async {
-    String normalized = preference;
-    if (normalized != 'auto' && normalized != 'en-US' && normalized != 'ml-IN') {
-      normalized = 'auto';
-    }
-
-    if (normalized == 'ml-IN' && !_mlSpeechAvailable) {
-      normalized = 'en-US';
-      debugPrint('ml-IN STT not available, falling back to en-US');
-    }
+    String normalized = _supportedLanguages.containsKey(preference) 
+        ? preference 
+        : 'auto';
 
     setState(() {
       _languagePreference = normalized;
@@ -227,19 +247,31 @@ Be a caring companion — like talking to a close friend.
   }
 
   void _updateAutoLanguageFromMessage(String messageText) {
-    final looksMalayalam = _hasMalayalamChars(messageText) || _isManglish(messageText);
-    _languageHistory.add(looksMalayalam ? 'ml' : 'en');
+    final detected = _detectLanguageLocale(messageText);
+    _languageHistory.add(detected);
     if (_languageHistory.length > 5) {
       _languageHistory.removeAt(0);
     }
 
     if (_languagePreference != 'auto') return;
 
-    final mlCount = _languageHistory.where((e) => e == 'ml').length;
-    final target = (mlCount >= 3 && _mlSpeechAvailable) ? 'ml-IN' : 'en-US';
-    if (target != _detectedLanguage) {
+    final map = <String, int>{};
+    for (var lang in _languageHistory) {
+      map[lang] = (map[lang] ?? 0) + 1;
+    }
+    
+    var mostCommon = 'en-US';
+    var maxCount = 0;
+    map.forEach((lang, count) {
+      if (count > maxCount) {
+        maxCount = count;
+        mostCommon = lang;
+      }
+    });
+
+    if (maxCount >= 3 && mostCommon != _detectedLanguage) {
       setState(() {
-        _detectedLanguage = target;
+        _detectedLanguage = mostCommon;
       });
     }
   }
@@ -249,39 +281,25 @@ Be a caring companion — like talking to a close friend.
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Voice Language'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            RadioListTile<String>(
-              title: const Text('Auto'),
-              value: 'auto',
-              groupValue: _languagePreference,
-              onChanged: (v) async {
-                Navigator.pop(context);
-                await _applyLanguagePreference(v ?? 'auto', persist: true);
-              },
-            ),
-            RadioListTile<String>(
-              title: const Text('English'),
-              value: 'en-US',
-              groupValue: _languagePreference,
-              onChanged: (v) async {
-                Navigator.pop(context);
-                await _applyLanguagePreference(v ?? 'en-US', persist: true);
-              },
-            ),
-            RadioListTile<String>(
-              title: Text(_mlSpeechAvailable ? 'Malayalam' : 'Malayalam (unavailable)'),
-              value: 'ml-IN',
-              groupValue: _languagePreference,
-              onChanged: _mlSpeechAvailable
-                  ? (v) async {
-                      Navigator.pop(context);
-                      await _applyLanguagePreference(v ?? 'ml-IN', persist: true);
-                    }
-                  : null,
-            ),
-          ],
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _supportedLanguages.length,
+            itemBuilder: (context, index) {
+              final key = _supportedLanguages.keys.elementAt(index);
+              final name = _supportedLanguages[key]!;
+              return RadioListTile<String>(
+                title: Text(name),
+                value: key,
+                groupValue: _languagePreference,
+                onChanged: (v) async {
+                  Navigator.pop(context);
+                  await _applyLanguagePreference(v ?? 'auto', persist: true);
+                },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -689,25 +707,14 @@ Be a caring companion — like talking to a close friend.
       onError: (error) => print('Speech recognition error: $error'),
       onStatus: (status) => print('Speech recognition status: $status'),
     );
-    try {
-      final locales = await _speech.locales();
-      _mlSpeechAvailable = locales.any(
-        (l) => l.localeId.toLowerCase().startsWith('ml'),
-      );
-      if (!_mlSpeechAvailable && _languagePreference == 'ml-IN') {
-        await _applyLanguagePreference('en-US', persist: false);
-      }
-    } catch (e) {
-      debugPrint('Failed to inspect speech locales: $e');
-    }
   }
 
   Future<void> _initializeTts() async {
     _flutterTts = FlutterTts();
 
-    await _flutterTts.setSpeechRate(0.75);
+    await _flutterTts.setSpeechRate(0.55); // Set to 0.55 for a slightly faster but still clear speed
     await _flutterTts.setVolume(1.0);
-    await _flutterTts.setPitch(1.0);
+    await _flutterTts.setPitch(1.1); // Slightly higher pitch for a gentler voice
 
     _flutterTts.setStartHandler(() {
       setState(() => _isSpeaking = true);
@@ -753,13 +760,46 @@ Be a caring companion — like talking to a close friend.
   Future<void> _speak(String text) async {
     if (!_speechEnabled) return;
 
-    // Detect Malayalam characters
-    final bool isMalayalam = _hasMalayalamChars(text) || _isManglish(text);
-
-    if (isMalayalam) {
-      await _flutterTts.setLanguage("ml-IN");
+    String targetLocale = 'en-US';
+    if (_languagePreference != 'auto') {
+      targetLocale = _languagePreference;
     } else {
-      await _flutterTts.setLanguage("en-US");
+      targetLocale = _detectLanguageLocale(text);
+    }
+
+    try {
+      final voices = await _flutterTts.getVoices;
+      if (voices != null) {
+        List<Map<String, String>> localeVoices = [];
+        for (var v in voices) {
+          if (v is Map) {
+            final loc = v['locale']?.toString() ?? '';
+            // Match the language code (e.g., 'en' or 'ml' or 'hi')
+            if (loc.toLowerCase().startsWith(targetLocale.split('-')[0].toLowerCase())) {
+              localeVoices.add({
+                'name': v['name']?.toString() ?? '',
+                'locale': loc,
+              });
+            }
+          }
+        }
+
+        if (localeVoices.isNotEmpty) {
+          // Attempt to find a distinctly female-named voice
+          var selectedVoice = localeVoices.firstWhere(
+            (v) => v['name']!.toLowerCase().contains('female') || v['name']!.toLowerCase().contains('-f-'),
+            orElse: () => localeVoices.first,
+          );
+          
+          await _flutterTts.setVoice({"name": selectedVoice['name']!, "locale": selectedVoice['locale']!});
+        } else {
+          await _flutterTts.setLanguage(targetLocale);
+        }
+      } else {
+        await _flutterTts.setLanguage(targetLocale);
+      }
+    } catch (e) {
+      await _flutterTts.setLanguage(targetLocale);
     }
 
     await _flutterTts.speak(text);
@@ -777,12 +817,10 @@ Be a caring companion — like talking to a close friend.
       bool available = await _speech.initialize();
       if (available) {
         setState(() => _isListening = true);
-        final localeId = (_languagePreference == 'auto'
-                ? _detectedLanguage
-                : _languagePreference) ==
-            'ml-IN'
-            ? 'ml_IN'
-            : 'en_US';
+        final prefLocale = _languagePreference == 'auto' 
+            ? _detectedLanguage 
+            : _languagePreference;
+        final localeId = prefLocale.replaceAll('-', '_');
         _speech.listen(
           onResult: (result) {
             setState(() {
@@ -868,14 +906,10 @@ Be a caring companion — like talking to a close friend.
     try {
       final String completePrompt = _systemPrompt + _buildUserContext();
 
-      final bool isManglish = _isManglish(messageText);
-
       final response = await _model.generateContent([
         Content.text(completePrompt),
         Content.text(
-          isManglish
-              ? "User message (Manglish): $messageText\nReply warmly in simple Malayalam or Manglish, like a caring friend."
-              : "User message: $messageText\nReply shortly, warmly, like a caring friend.",
+          "User message: $messageText\nReply warmly and shortly in the same general language as the user (e.g. Hindi if they speak Hindi, Tamil if they speak Tamil, Spanish if they speak Spanish, etc.), like a caring friend.",
         ),
       ]);
 
@@ -893,11 +927,14 @@ Be a caring companion — like talking to a close friend.
       _sessionMessages.add({'role': 'ai', 'text': aiText});
       _lastMessageAt = DateTime.now();
 
-      // Store the conversation to persistent memory with key facts
-      await _storeConversationMemory(messageText, aiText);
-
       _scrollToTop();
-      await _speak(aiText);
+      
+      // FIRE TTS IMMEDIATELY TO AVOID LATENCY
+      // Do not await it so it starts talking right away
+      _speak(aiText);
+
+      // Store the conversation to persistent memory with key facts in the background
+      await _storeConversationMemory(messageText, aiText);
     } catch (e) {
       final errorMessage = ChatMessage(
         user: _aiUser,

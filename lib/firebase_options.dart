@@ -51,7 +51,7 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBJ5BGvEZyljLa5Sl_OdzwqYW5j1KRPnBg',
+    apiKey: 'AIzaSyAO73wFuBKy5DvL3b9MBq6tKpXwrhC2Jzc',
     appId: '1:965792184735:android:e9f924a3b8f2d80dc525aa',
     messagingSenderId: '965792184735',
     projectId: 'mitra-e870d',

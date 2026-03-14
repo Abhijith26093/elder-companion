@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'firebase_options.dart';
 import 'auth_wrapper.dart'; // Elder login/auth screen
 import 'caregiver_dashboard.dart'; // Caregiver dashboard
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
 import 'services/notification_service.dart';
 import 'services/push_notification_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -40,6 +41,15 @@ Future<void> main() async {
   } else {
     await Firebase.initializeApp();
   }
+
+  // ✅ App Check: use debug provider in debug mode to bypass Play Integrity
+  // This fixes invalid-recaptcha-token on Android 12+ debug builds
+  await FirebaseAppCheck.instance.activate(
+    androidProvider: kDebugMode
+        ? AndroidProvider.debug
+        : AndroidProvider.playIntegrity,
+    appleProvider: AppleProvider.appAttest,
+  );
 
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,

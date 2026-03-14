@@ -12,16 +12,7 @@
           "package_name": "com.example.mitra"
         }
       },
-      "oauth_client": [
-        {
-          "client_id": "965792184735-s3lsg680v55pbrine8ovhfv4sqtecd7s.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.example.mitra",
-            "certificate_hash": "098f97f2af5f03f1a71600f7cad1e20f00391111"
-          }
-        }
-      ],
+      "oauth_client": [],
       "api_key": [
         {
           "current_key": "AIzaSyAO73wFuBKy5DvL3b9MBq6tKpXwrhC2Jzc"
