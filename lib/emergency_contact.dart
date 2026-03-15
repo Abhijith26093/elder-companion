@@ -53,6 +53,22 @@ class _EmergencyContactScreenState extends State<EmergencyContactScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   late Stream<List<EmergencyContact>> _contactsStream;
 
+  String? _normalizePhone(String? value) {
+    final input = (value ?? '').trim();
+    final digits = input.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return null;
+    if (input.startsWith('+') && digits.length >= 10 && digits.length <= 15) {
+      return '+$digits';
+    }
+    if (digits.length == 10) {
+      return '+91$digits';
+    }
+    if (digits.length >= 11 && digits.length <= 15) {
+      return '+$digits';
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -83,6 +99,44 @@ class _EmergencyContactScreenState extends State<EmergencyContactScreen> {
             return docs;
           });
     }
+  }
+
+  Future<void> _syncPrimaryContactToUserDoc(String uid) async {
+    final contactsRef = _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('emergency_contacts');
+
+    QuerySnapshot<Map<String, dynamic>> snapshot = await contactsRef
+        .where('isPrimary', isEqualTo: true)
+        .limit(1)
+        .get();
+
+    if (snapshot.docs.isEmpty) {
+      snapshot = await contactsRef.orderBy('createdAt').limit(1).get();
+    }
+
+    if (snapshot.docs.isEmpty) {
+      await _firestore.collection('users').doc(uid).set({
+        'emergencyContact': FieldValue.delete(),
+      }, SetOptions(merge: true));
+      return;
+    }
+
+    final data = snapshot.docs.first.data();
+    final phone = _normalizePhone(data['phoneNumber']?.toString());
+    final name = (data['name'] ?? '').toString().trim();
+
+    if (phone == null || name.isEmpty) {
+      return;
+    }
+
+    await _firestore.collection('users').doc(uid).set({
+      'emergencyContact': {
+        'name': name,
+        'phone': phone,
+      },
+    }, SetOptions(merge: true));
   }
 
   Future<void> _makeCall(String phoneNumber) async {
@@ -127,6 +181,7 @@ class _EmergencyContactScreenState extends State<EmergencyContactScreen> {
             .collection('emergency_contacts')
             .doc(contact.id)
             .update({'name': contact.name, 'phoneNumber': contact.phoneNumber});
+        await _syncPrimaryContactToUserDoc(user.uid);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Contact updated successfully'),
@@ -134,11 +189,22 @@ class _EmergencyContactScreenState extends State<EmergencyContactScreen> {
           ),
         );
       } else {
+        final existingContacts = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('emergency_contacts')
+            .limit(1)
+            .get();
+
         await _firestore
             .collection('users')
             .doc(user.uid)
             .collection('emergency_contacts')
-            .add(contact.toFirestore());
+            .add({
+              ...contact.toFirestore(),
+              'isPrimary': existingContacts.docs.isEmpty,
+            });
+        await _syncPrimaryContactToUserDoc(user.uid);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Contact added successfully'),
@@ -167,6 +233,7 @@ class _EmergencyContactScreenState extends State<EmergencyContactScreen> {
           .collection('emergency_contacts')
           .doc(contactId)
           .delete();
+      await _syncPrimaryContactToUserDoc(user.uid);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Contact deleted successfully'),
@@ -212,6 +279,7 @@ class _EmergencyContactScreenState extends State<EmergencyContactScreen> {
       batch.update(selectedContactRef, {'isPrimary': true});
 
       await batch.commit();
+      await _syncPrimaryContactToUserDoc(user.uid);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Primary contact updated'),
@@ -513,6 +581,22 @@ class _AddEditContactScreenState extends State<AddEditContactScreen> {
     );
   }
 
+  String? _normalizePhone(String? value) {
+    final input = (value ?? '').trim();
+    final digits = input.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return null;
+    if (input.startsWith('+') && digits.length >= 10 && digits.length <= 15) {
+      return '+$digits';
+    }
+    if (digits.length == 10) {
+      return '+91$digits';
+    }
+    if (digits.length >= 11 && digits.length <= 15) {
+      return '+$digits';
+    }
+    return null;
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -594,11 +678,12 @@ class _AddEditContactScreenState extends State<AddEditContactScreen> {
                   ),
                 ),
                 validator: (value) {
+                  final normalized = _normalizePhone(value);
                   if (value == null || value.isEmpty) {
                     return 'Please enter a phone number';
                   }
-                  if (value.length < 10) {
-                    return 'Phone number must be at least 10 digits';
+                  if (normalized == null) {
+                    return 'Enter a valid phone number with country code';
                   }
                   return null;
                 },
@@ -610,10 +695,16 @@ class _AddEditContactScreenState extends State<AddEditContactScreen> {
                 child: ElevatedButton(
                   onPressed: () {
                     if (_formKey.currentState!.validate()) {
+                      final normalizedPhone = _normalizePhone(
+                        _phoneController.text,
+                      );
+                      if (normalizedPhone == null) {
+                        return;
+                      }
                       final contact = EmergencyContact(
                         id: widget.contact?.id ?? '',
-                        name: _nameController.text,
-                        phoneNumber: _phoneController.text,
+                        name: _nameController.text.trim(),
+                        phoneNumber: normalizedPhone,
                         createdAt: widget.contact?.createdAt ?? DateTime.now(),
                         isPrimary: widget.contact?.isPrimary ?? false,
                       );

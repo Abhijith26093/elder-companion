@@ -1,5 +1,6 @@
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
+const {collectAlertRecipients, sendAlertSms} = require("./alertSms");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -124,6 +125,27 @@ exports.checkInactivity = onSchedule("every 2 hours", async () => {
         });
       } catch (pushErr) {
         console.error(`Failed to send inactivity push for elder ${elderId}:`, pushErr);
+      }
+
+      try {
+        const recipients = collectAlertRecipients(elderData);
+        if (recipients.length > 0) {
+          await sendAlertSms({
+            elderId,
+            elderName,
+            alertType: "inactivity",
+            recipients,
+            messageBody: `Mitra Alert: No activity from ${elderName} for ${hoursText}.`,
+            metadata: {
+              severity,
+              hoursInactive: Number.isFinite(hoursInactive) ?
+                Number(hoursInactive.toFixed(2)) :
+                null,
+            },
+          });
+        }
+      } catch (smsErr) {
+        console.error(`Failed to send inactivity SMS for elder ${elderId}:`, smsErr);
       }
     }
 

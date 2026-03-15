@@ -167,12 +167,10 @@ class _MemoryGameScreenState extends State<MemoryGameScreen> {
 
 class _CardModel {
   final int number;
-  bool isFlipped;
-  bool isMatched;
+  bool isFlipped = false;
+  bool isMatched = false;
 
   _CardModel({
     required this.number,
-    this.isFlipped = false,
-    this.isMatched = false,
   });
 }

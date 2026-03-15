@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 import 'medicine_reminder.dart';
 import 'alerts_screen.dart';
 import 'health_vitals_screen.dart';
@@ -22,6 +23,51 @@ class CaregiverDashboard extends StatefulWidget {
 
 class _CaregiverDashboardState extends State<CaregiverDashboard> {
   final User? currentUser = FirebaseAuth.instance.currentUser;
+  String? _caregiverLookupPhone;
+  bool _isLoadingLookupPhone = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCaregiverLookupPhone();
+  }
+
+  Future<void> _loadCaregiverLookupPhone() async {
+    final authPhone = currentUser?.phoneNumber;
+    if (authPhone != null && authPhone.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          _caregiverLookupPhone = authPhone;
+          _isLoadingLookupPhone = false;
+        });
+      }
+      return;
+    }
+
+    final uid = currentUser?.uid;
+    if (uid == null) {
+      if (mounted) {
+        setState(() => _isLoadingLookupPhone = false);
+      }
+      return;
+    }
+
+    try {
+      final snapshot =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final profilePhone = snapshot.data()?['phoneNumber']?.toString();
+      if (!mounted) return;
+      setState(() {
+        _caregiverLookupPhone = profilePhone;
+        _isLoadingLookupPhone = false;
+      });
+    } catch (e) {
+      debugPrint('Failed to load caregiver phone lookup: $e');
+      if (mounted) {
+        setState(() => _isLoadingLookupPhone = false);
+      }
+    }
+  }
 
   Future<void> _showLinkElderDialog() async {
     final controller = TextEditingController();
@@ -94,7 +140,20 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
                 final data = matched.data() ?? {};
                 final elderName = (data['name'] ?? 'the elder').toString();
                 final currentPhone = (data['caregiverPhone'] ?? '').toString();
-                final myPhone = currentUser?.phoneNumber ?? '';
+                final myPhone = _caregiverLookupPhone ?? '';
+
+                if (myPhone.isEmpty) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'This caregiver account does not have a phone number yet. Sign in with phone or WhatsApp, or save a phone number in the caregiver profile before linking.',
+                        ),
+                      ),
+                    );
+                  }
+                  return;
+                }
 
                 if (currentPhone == myPhone && currentPhone.isNotEmpty) {
                   if (context.mounted) {
@@ -151,6 +210,32 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
     return double.tryParse(value.trim());
   }
 
+  Future<Map<String, dynamic>?> _resolveLatestLocation(
+    String elderId,
+    Map<String, dynamic> elderData,
+  ) async {
+    final liveLocation = elderData['liveLocation'] as Map<String, dynamic>?;
+    if (liveLocation != null &&
+        liveLocation['latitude'] != null &&
+        liveLocation['longitude'] != null) {
+      return liveLocation;
+    }
+
+    final historySnapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(elderId)
+        .collection('location_history')
+        .orderBy('timestamp', descending: true)
+        .limit(1)
+        .get();
+
+    if (historySnapshot.docs.isEmpty) {
+      return null;
+    }
+
+    return historySnapshot.docs.first.data();
+  }
+
   Color _moodColor(String? mood) {
     switch ((mood ?? '').toLowerCase()) {
       case 'happy':
@@ -170,6 +255,29 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
   Widget build(BuildContext context) {
     if (currentUser == null) {
       return const Scaffold(body: Center(child: Text("Not logged in")));
+    }
+
+    if (_isLoadingLookupPhone) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_caregiverLookupPhone == null || _caregiverLookupPhone!.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Caregiver Tools'),
+        ),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'This caregiver account does not have a phone number yet. Use phone or WhatsApp login, or save a phone number to continue linking elders.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
     }
 
     return Scaffold(
@@ -202,7 +310,7 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('users')
-            .where('caregiverPhone', isEqualTo: currentUser!.phoneNumber)
+            .where('caregiverPhone', isEqualTo: _caregiverLookupPhone)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -218,7 +326,7 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
               child: Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Text(
-                  "No Elders found linked to your number (${currentUser!.phoneNumber}).\n\nPlease ensure the Elder has entered your phone number correctly in their profile.",
+                  "No Elders found linked to your number ($_caregiverLookupPhone).\n\nPlease ensure the Elder has entered your phone number correctly in their profile.",
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 18, color: Colors.grey),
                 ),
@@ -287,8 +395,10 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
                         const SizedBox(height: 6),
                         Chip(
                           label: Text('Mood: $lastMood'),
-                          backgroundColor: _moodColor(lastMood).withOpacity(0.15),
-                          side: BorderSide(color: _moodColor(lastMood).withOpacity(0.4)),
+                          backgroundColor: _moodColor(lastMood).withValues(alpha: 0.15),
+                          side: BorderSide(
+                            color: _moodColor(lastMood).withValues(alpha: 0.4),
+                          ),
                         ),
                         const SizedBox(height: 4),
                         _TodayMedicationStatus(elderId: elderId),
@@ -363,7 +473,10 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
                 title: const Text('Open Current Location'),
                 onTap: () async {
                   Navigator.pop(sheetContext);
-                  final liveLocation = elderData['liveLocation'] as Map<String, dynamic>?;
+                  final liveLocation = await _resolveLatestLocation(
+                    elderId,
+                    elderData,
+                  );
                   if (liveLocation != null &&
                       liveLocation['latitude'] != null &&
                       liveLocation['longitude'] != null) {
@@ -383,7 +496,9 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('Location not available yet for $elderName.'),
+                          content: Text(
+                            'Location not available yet for $elderName. Ask them to open the app and allow location access.',
+                          ),
                         ),
                       );
                     }
@@ -684,7 +799,7 @@ class CaregiverFeatureTile extends StatelessWidget {
         leading: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.15),
+            color: color.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, color: color, size: 28),
@@ -876,22 +991,40 @@ class SosHistoryScreen extends StatelessWidget {
           final logs = snapshot.data!.docs;
 
           return ListView.builder(
+            padding: const EdgeInsets.all(12),
             itemCount: logs.length,
             itemBuilder: (context, index) {
               final log = logs[index].data() as Map<String, dynamic>;
               final timestamp = log['timestamp'] as Timestamp?;
-              final dateStr = timestamp != null 
-                  ? "${timestamp.toDate().toLocal().toString().split('.')[0]}" 
-                  : "Unknown Time";
-              final status = log['status'] ?? 'Unknown';
+              final dateStr = timestamp != null
+                  ? DateFormat('dd MMM yyyy, hh:mm a').format(timestamp.toDate())
+                  : 'Unknown Time';
+              final status = (log['status'] ?? 'Unknown').toString();
+              final triggeredBy = (log['triggeredBy'] ?? '').toString();
+              final resolvedBy = (log['resolvedBy'] ?? '').toString();
+              final notifiedContacts = ((log['notifiedContacts'] as List?) ?? [])
+                  .map((value) => value.toString())
+                  .where((value) => value.isNotEmpty)
+                  .toList();
+              final isResolved = status.contains('Resolved');
 
-              return ListTile(
-                leading: Icon(
-                  status.toString().contains('Resolved') ? Icons.check_circle : Icons.warning,
-                  color: status.toString().contains('Resolved') ? Colors.green : Colors.red,
+              return Card(
+                margin: const EdgeInsets.only(bottom: 10),
+                child: ListTile(
+                  leading: Icon(
+                    isResolved ? Icons.check_circle : Icons.warning,
+                    color: isResolved ? Colors.green : Colors.red,
+                  ),
+                  title: Text(status),
+                  subtitle: Text([
+                    dateStr,
+                    if (triggeredBy.isNotEmpty) 'Triggered by: $triggeredBy',
+                    if (resolvedBy.isNotEmpty) 'Resolved by: $resolvedBy',
+                    if (notifiedContacts.isNotEmpty)
+                      'SMS sent to: ${notifiedContacts.join(', ')}',
+                  ].join('\n')),
+                  isThreeLine: true,
                 ),
-                title: Text(status),
-                subtitle: Text(dateStr),
               );
             },
           );

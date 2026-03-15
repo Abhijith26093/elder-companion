@@ -16,6 +16,13 @@ class PushNotificationService {
   final FirebaseMessaging _fcm = FirebaseMessaging.instance;
 
   Future<void> init() async {
+    if (kIsWeb) {
+      debugPrint(
+        'Skipping Firebase Messaging token initialization on web.',
+      );
+      return;
+    }
+
     // 1. Request permissions for iOS etc
     NotificationSettings settings = await _fcm.requestPermission(
       alert: true,

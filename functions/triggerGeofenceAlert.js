@@ -1,5 +1,6 @@
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
+const {collectAlertRecipients, sendAlertSms} = require("./alertSms");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -85,6 +86,27 @@ exports.triggerGeofenceAlert = onCall(async (request) => {
     });
   } catch (error) {
     console.error("Geofence push failed:", error);
+  }
+
+  try {
+    const recipients = collectAlertRecipients(elderData);
+    if (recipients.length > 0) {
+      await sendAlertSms({
+        elderId: uid,
+        elderName,
+        alertType: "geofence",
+        recipients,
+        messageBody:
+          `Mitra Alert: ${elderName} moved outside the safe zone by ${roundedDistance} meters.`,
+        metadata: {
+          latitude,
+          longitude,
+          distanceMeters: Number(distanceMeters || 0),
+        },
+      });
+    }
+  } catch (smsError) {
+    console.error("Geofence SMS failed:", smsError);
   }
 
   return {success: true, pushSent: true};

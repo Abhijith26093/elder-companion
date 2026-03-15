@@ -3,29 +3,25 @@ import 'package:flutter/material.dart';
 import 'auth_service.dart';
 import 'otp_verification_screen.dart';
 
-class PhoneLoginScreen extends StatefulWidget {
-  const PhoneLoginScreen({
+class EmailLoginScreen extends StatefulWidget {
+  const EmailLoginScreen({
     super.key,
     this.role = 'elder',
-    this.isLogin = true,
   });
 
   final String role;
-  final bool isLogin;
 
   @override
-  State<PhoneLoginScreen> createState() => _PhoneLoginScreenState();
+  State<EmailLoginScreen> createState() => _EmailLoginScreenState();
 }
 
-class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
-  final TextEditingController _phoneController = TextEditingController(
-    text: '+919207027558',
-  );
+class _EmailLoginScreenState extends State<EmailLoginScreen> {
+  final TextEditingController _emailController = TextEditingController();
   bool _isLoading = false;
 
   @override
   void dispose() {
-    _phoneController.dispose();
+    _emailController.dispose();
     super.dispose();
   }
 
@@ -34,8 +30,9 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final session = await AuthService.instance.startPhoneLogin(
-        _phoneController.text,
+      final session = await AuthService.instance.startBackendOtp(
+        channel: AuthChannel.email,
+        identifier: _emailController.text,
       );
       if (!mounted) return;
 
@@ -43,19 +40,19 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => OtpVerificationScreen(
-            title: 'Enter the SMS code',
+            title: 'Check your inbox',
             subtitle:
-                'We sent an OTP to your phone. For the configured Firebase test number, use 123456.',
+                'We sent a one-time password by email. Enter it below to continue.',
             initialSession: session,
-            onVerify: AuthService.instance.verifyPhoneOtp,
-            onResend: AuthService.instance.resendPhoneOtp,
+            onVerify: AuthService.instance.verifyBackendOtp,
+            onResend: AuthService.instance.resendBackendOtp,
           ),
         ),
       );
     } on AuthFlowException catch (error) {
       _showMessage(error.message, isError: true);
     } catch (_) {
-      _showMessage('Unable to start phone login right now.', isError: true);
+      _showMessage('Unable to send the email OTP.', isError: true);
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -67,18 +64,15 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? Colors.red.shade700 : Colors.teal,
+        backgroundColor: isError ? Colors.red.shade700 : Colors.orange.shade700,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final roleLabel = widget.role[0].toUpperCase() +
-        widget.role.substring(1).toLowerCase();
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Phone Login')),
+      appBar: AppBar(title: const Text('Email OTP Login')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -86,14 +80,14 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Firebase Phone Authentication',
+                'Email OTP Authentication',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Sign in as $roleLabel using Firebase phone verification.',
+                'The backend generates the OTP, stores it in Firestore, and signs the app into Firebase with a custom token after verification.',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: Colors.black54,
                     ),
@@ -103,30 +97,31 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  color: Colors.teal.shade50,
+                  color: Colors.orange.shade50,
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Development test number',
+                      'Live email delivery',
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
                     SizedBox(height: 8),
-                    Text('+919207027558'),
+                    Text('Send OTPs to any valid email address.'),
                     SizedBox(height: 4),
-                    Text('Firebase test OTP: 123456'),
+                    Text('This requires your backend SMTP credentials to be configured.'),
                   ],
                 ),
               ),
               const SizedBox(height: 24),
               TextField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email],
                 decoration: const InputDecoration(
-                  labelText: 'Phone Number',
-                  hintText: '+919207027558',
+                  labelText: 'Email Address',
+                  hintText: '22b827@nssce.ac.in',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -136,7 +131,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 child: FilledButton(
                   onPressed: _isLoading ? null : _sendOtp,
                   style: FilledButton.styleFrom(
-                    backgroundColor: Colors.teal,
+                    backgroundColor: Colors.orange.shade700,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                   child: _isLoading
@@ -148,7 +143,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                             color: Colors.white,
                           ),
                         )
-                      : const Text('Send OTP'),
+                      : const Text('Send Email OTP'),
                 ),
               ),
             ],

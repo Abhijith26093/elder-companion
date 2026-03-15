@@ -34,6 +34,13 @@ class NotificationService {
       tz.setLocalLocation(tz.getLocation('UTC'));
     }
 
+    if (kIsWeb) {
+      debugPrint(
+        'Skipping flutter_local_notifications initialization on web.',
+      );
+      return;
+    }
+
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
 

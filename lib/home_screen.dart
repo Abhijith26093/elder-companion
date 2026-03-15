@@ -62,6 +62,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   StreamSubscription<bool>? _connectivitySub;
   bool _isOnline = true;
 
+  String? _normalizePhone(String? value) {
+    final input = (value ?? '').trim();
+    final digits = input.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return null;
+    if (input.startsWith('+') && digits.length >= 10 && digits.length <= 15) {
+      return '+$digits';
+    }
+    if (digits.length == 10) {
+      return '+91$digits';
+    }
+    if (digits.length >= 11 && digits.length <= 15) {
+      return '+$digits';
+    }
+    return null;
+  }
+
+  Future<Map<String, String>?> _loadPrimaryEmergencyContactFromCollection(
+    String uid,
+  ) async {
+    final contactsRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('emergency_contacts');
+
+    QuerySnapshot<Map<String, dynamic>> snapshot = await contactsRef
+        .where('isPrimary', isEqualTo: true)
+        .limit(1)
+        .get();
+
+    if (snapshot.docs.isEmpty) {
+      snapshot = await contactsRef.orderBy('createdAt').limit(1).get();
+    }
+
+    if (snapshot.docs.isEmpty) return null;
+
+    final data = snapshot.docs.first.data();
+    final phone = _normalizePhone(data['phoneNumber']?.toString());
+    final name = (data['name'] ?? '').toString().trim();
+
+    if (phone == null || name.isEmpty) return null;
+
+    return {'name': name, 'phone': phone};
+  }
+
   @override
   void initState() {
     super.initState();
@@ -145,11 +189,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         await prefs.setString('cached_profile', jsonEncode(data));
       }
 
+      final rootEmergency = data?['emergencyContact'] as Map<String, dynamic>?;
+      String? emergencyName = rootEmergency?['name']?.toString();
+      String? emergencyPhone = _normalizePhone(rootEmergency?['phone']?.toString());
+
+      if ((emergencyPhone == null || emergencyPhone.isEmpty) && data != null) {
+        final fallbackContact = await _loadPrimaryEmergencyContactFromCollection(
+          user.uid,
+        );
+        if (fallbackContact != null) {
+          emergencyName = fallbackContact['name'];
+          emergencyPhone = fallbackContact['phone'];
+          data['emergencyContact'] = fallbackContact;
+          await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+            'emergencyContact': fallbackContact,
+          }, SetOptions(merge: true));
+        }
+      }
+
       setState(() {
         _userProfile = data;
         _userName = data?['name'];
-        _emergencyContactName = data?['emergencyContact']?['name'];
-        _emergencyContactPhone = data?['emergencyContact']?['phone'];
+        _emergencyContactName = emergencyName;
+        _emergencyContactPhone = emergencyPhone;
       });
 
       await _scheduleWellnessCheckin();
@@ -163,8 +225,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             setState(() {
               _userProfile = data;
               _userName = data['name'];
-              _emergencyContactName = data['emergencyContact']?['name'];
-              _emergencyContactPhone = data['emergencyContact']?['phone'];
+              _emergencyContactName =
+                  data['emergencyContact']?['name']?.toString();
+              _emergencyContactPhone = _normalizePhone(
+                data['emergencyContact']?['phone']?.toString(),
+              );
             });
           }
         }
@@ -309,11 +374,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // Emergency SMS Alert
   Future<void> _sendSMSAlert() async {
-    if (_emergencyContactPhone == null || _emergencyContactPhone!.isEmpty) {
+    final caregiverPhone = _normalizePhone(
+      _userProfile?['caregiverPhone']?.toString(),
+    );
+    final recipients = <String>{
+      if (_emergencyContactPhone != null && _emergencyContactPhone!.isNotEmpty)
+        _emergencyContactPhone!,
+      if (caregiverPhone != null && caregiverPhone.isNotEmpty) caregiverPhone,
+    }.toList();
+
+    if (recipients.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'No emergency contact found. Please update your profile.',
+            'No caregiver or emergency contact found. Please update your profile.',
           ),
           backgroundColor: Colors.orange,
         ),
@@ -326,7 +400,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       builder: (_) => AlertDialog(
         title: const Text('Send Emergency Alert?'),
         content: Text(
-          'This will send an SMS to $_emergencyContactName ($_emergencyContactPhone).',
+          'This will notify your caregiver and emergency contacts through Mitra SMS:\n\n${recipients.join('\n')}',
         ),
         actions: [
           TextButton(
@@ -347,46 +421,114 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       final userDoc = FirebaseFirestore.instance.collection('users').doc(user.uid);
-      
-      // Update Emergency State
-      await userDoc.set({
-        'emergencyState': {
-          'isActive': true,
+      try {
+        await userDoc.set({
+          'emergencyState': {
+            'isActive': true,
+            'timestamp': FieldValue.serverTimestamp(),
+          }
+        }, SetOptions(merge: true));
+
+        await userDoc.collection('sos_history').add({
           'timestamp': FieldValue.serverTimestamp(),
-        }
-      }, SetOptions(merge: true));
+          'status': 'Triggered',
+          'triggeredBy': _userName ?? 'Elder',
+          'notifiedContacts': recipients,
+        });
 
-      // Record in History
-      await userDoc.collection('sos_history').add({
-        'timestamp': FieldValue.serverTimestamp(),
-        'status': 'Triggered',
-        'triggeredBy': _userName ?? 'Elder',
-      });
+        await userDoc.collection('alerts').add({
+          'type': 'sos',
+          'title': 'SOS Activated',
+          'description':
+              '${_userName ?? "Elder"} triggered SOS and may need immediate help.',
+          'severity': 'CRITICAL',
+          'isRead': false,
+          'metadata': {
+            'notifiedContacts': recipients,
+          },
+          'createdAt': FieldValue.serverTimestamp(),
+        });
 
-      await userDoc.collection('alerts').add({
-        'type': 'sos',
-        'title': 'SOS Activated',
-        'description':
-            '${_userName ?? "Elder"} triggered SOS and may need immediate help.',
-        'severity': 'CRITICAL',
-        'isRead': false,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Emergency alert sent. Mitra is notifying ${recipients.length} contact${recipients.length == 1 ? '' : 's'} by SMS.',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to trigger emergency alert: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
+  }
 
-    final message = Uri.encodeComponent(
-      'EMERGENCY ALERT: ${_userName ?? "Your elder"} needs immediate assistance.',
+  Future<void> _openNearbyServices() async {
+    final serviceOptions = <Map<String, String>>[
+      {'label': 'Nearby Hospitals', 'query': 'hospital'},
+      {'label': 'Nearby Pharmacies', 'query': 'pharmacy'},
+      {'label': 'Nearby Police', 'query': 'police station'},
+      {'label': 'Nearby Ambulance', 'query': 'ambulance service'},
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: serviceOptions
+                .map(
+                  (item) => ListTile(
+                    leading: const Icon(Icons.map_outlined),
+                    title: Text(item['label']!),
+                    onTap: () async {
+                      Navigator.pop(sheetContext);
+                      final position =
+                          await LocationService().getCurrentLocation();
+                      if (position == null) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Location is unavailable. Please enable location permissions and try again.',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+
+                      final query = Uri.encodeComponent(
+                        '${item['query']} near ${position.latitude},${position.longitude}',
+                      );
+                      final url = Uri.parse(
+                        'https://www.google.com/maps/search/?api=1&query=$query',
+                      );
+
+                      if (await canLaunchUrl(url)) {
+                        await launchUrl(url);
+                      } else if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Could not open maps right now.'),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                )
+                .toList(),
+          ),
+        );
+      },
     );
-
-    final smsUri = Uri(
-      scheme: 'sms',
-      path: _emergencyContactPhone,
-      queryParameters: {'body': message},
-    );
-
-    if (await canLaunchUrl(smsUri)) {
-      await launchUrl(smsUri);
-    }
   }
 
   // Voice Command Listener
@@ -444,7 +586,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const EmergencyContactScreen()),
-      );
+      ).then((_) => _loadEmergencyContact());
     } else if (lowerCommand.contains("event") ||
         lowerCommand.contains("doctor") || lowerCommand.contains("appointment")) {
       Navigator.push(
@@ -483,14 +625,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         break;
 
       case 'Locate Nearby':
-        _showComingSoon(featureTitle);
+        _openNearbyServices();
         break;
 
       case 'Contact Relatives':
         Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const EmergencyContactScreen()),
-        );
+        ).then((_) => _loadEmergencyContact());
         break;
 
       case 'Emergency':
