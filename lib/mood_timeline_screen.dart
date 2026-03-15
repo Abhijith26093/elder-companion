@@ -265,7 +265,7 @@ class MoodTimelineScreen extends StatelessWidget {
                                 height: 30,
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
-                                  color: colorForScore(s).withOpacity(0.15),
+                                  color: colorForScore(s).withValues(alpha: 0.15),
                                   shape: BoxShape.circle,
                                 ),
                                 child: Text(
@@ -302,7 +302,7 @@ class MoodTimelineScreen extends StatelessWidget {
                           children: [
                             Chip(
                               label: Text(mood),
-                              backgroundColor: _moodColor(mood).withOpacity(0.15),
+                              backgroundColor: _moodColor(mood).withValues(alpha: 0.15),
                             ),
                             const SizedBox(width: 8),
                             Text(

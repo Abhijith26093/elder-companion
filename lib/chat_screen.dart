@@ -283,22 +283,27 @@ Be a deeply loving, sentimental, and patient listener.
         title: const Text('Voice Language'),
         content: SizedBox(
           width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _supportedLanguages.length,
-            itemBuilder: (context, index) {
-              final key = _supportedLanguages.keys.elementAt(index);
-              final name = _supportedLanguages[key]!;
-              return RadioListTile<String>(
-                title: Text(name),
-                value: key,
-                groupValue: _languagePreference,
-                onChanged: (v) async {
-                  Navigator.pop(context);
-                  await _applyLanguagePreference(v ?? 'auto', persist: true);
-                },
+          child: RadioGroup<String>(
+            groupValue: _languagePreference,
+            onChanged: (value) async {
+              Navigator.pop(context);
+              await _applyLanguagePreference(
+                value ?? 'auto',
+                persist: true,
               );
             },
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: _supportedLanguages.length,
+              itemBuilder: (context, index) {
+                final key = _supportedLanguages.keys.elementAt(index);
+                final name = _supportedLanguages[key]!;
+                return RadioListTile<String>(
+                  title: Text(name),
+                  value: key,
+                );
+              },
+            ),
           ),
         ),
       ),
@@ -831,8 +836,11 @@ Be a deeply loving, sentimental, and patient listener.
           localeId: localeId,
           listenFor: const Duration(seconds: 30),
           pauseFor: const Duration(seconds: 5),
-          cancelOnError: true,
-          listenMode: stt.ListenMode.confirmation,
+          listenOptions: stt.SpeechListenOptions(
+            partialResults: true,
+            cancelOnError: true,
+            listenMode: stt.ListenMode.confirmation,
+          ),
         );
       }
     } else {
@@ -1067,17 +1075,18 @@ Be a deeply loving, sentimental, and patient listener.
 
       if (pattern.hasMatch(normalized)) {
         final snippet = message.length > 100 ? message.substring(0, 100) : message;
-        _functions
-            .httpsCallable('triggerDistressAlert')
-            .call({
+        unawaited(() async {
+          try {
+            await _functions.httpsCallable('triggerDistressAlert').call({
               'uid': user.uid,
               'keyword': keyword,
               'severity': severity,
               'messageSnippet': snippet,
-            })
-            .catchError((e) {
-              print('Distress alert trigger failed: $e');
             });
+          } catch (e) {
+            print('Distress alert trigger failed: $e');
+          }
+        }());
         return;
       }
     }

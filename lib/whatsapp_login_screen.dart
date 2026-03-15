@@ -3,24 +3,20 @@ import 'package:flutter/material.dart';
 import 'auth_service.dart';
 import 'otp_verification_screen.dart';
 
-class PhoneLoginScreen extends StatefulWidget {
-  const PhoneLoginScreen({
+class WhatsappLoginScreen extends StatefulWidget {
+  const WhatsappLoginScreen({
     super.key,
     this.role = 'elder',
-    this.isLogin = true,
   });
 
   final String role;
-  final bool isLogin;
 
   @override
-  State<PhoneLoginScreen> createState() => _PhoneLoginScreenState();
+  State<WhatsappLoginScreen> createState() => _WhatsappLoginScreenState();
 }
 
-class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
-  final TextEditingController _phoneController = TextEditingController(
-    text: '+919207027558',
-  );
+class _WhatsappLoginScreenState extends State<WhatsappLoginScreen> {
+  final TextEditingController _phoneController = TextEditingController();
   bool _isLoading = false;
 
   @override
@@ -34,8 +30,9 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final session = await AuthService.instance.startPhoneLogin(
-        _phoneController.text,
+      final session = await AuthService.instance.startBackendOtp(
+        channel: AuthChannel.whatsapp,
+        identifier: _phoneController.text,
       );
       if (!mounted) return;
 
@@ -43,19 +40,19 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => OtpVerificationScreen(
-            title: 'Enter the SMS code',
+            title: 'Check WhatsApp',
             subtitle:
-                'We sent an OTP to your phone. For the configured Firebase test number, use 123456.',
+                'We sent a one-time password to your WhatsApp number. Enter it below to continue.',
             initialSession: session,
-            onVerify: AuthService.instance.verifyPhoneOtp,
-            onResend: AuthService.instance.resendPhoneOtp,
+            onVerify: AuthService.instance.verifyBackendOtp,
+            onResend: AuthService.instance.resendBackendOtp,
           ),
         ),
       );
     } on AuthFlowException catch (error) {
       _showMessage(error.message, isError: true);
     } catch (_) {
-      _showMessage('Unable to start phone login right now.', isError: true);
+      _showMessage('Unable to send the WhatsApp OTP.', isError: true);
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -67,18 +64,15 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? Colors.red.shade700 : Colors.teal,
+        backgroundColor: isError ? Colors.red.shade700 : Colors.green.shade700,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final roleLabel = widget.role[0].toUpperCase() +
-        widget.role.substring(1).toLowerCase();
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Phone Login')),
+      appBar: AppBar(title: const Text('WhatsApp OTP Login')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -86,14 +80,14 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Firebase Phone Authentication',
+                'WhatsApp OTP Authentication',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Sign in as $roleLabel using Firebase phone verification.',
+                'Your backend will generate and verify the OTP, then hand Firebase a custom token session.',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: Colors.black54,
                     ),
@@ -103,20 +97,20 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  color: Colors.teal.shade50,
+                  color: Colors.green.shade50,
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Development test number',
+                      'Live WhatsApp delivery',
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
                     SizedBox(height: 8),
-                    Text('+919207027558'),
+                    Text('Send OTPs to any valid WhatsApp-enabled phone number.'),
                     SizedBox(height: 4),
-                    Text('Firebase test OTP: 123456'),
+                    Text('This requires your backend WhatsApp Cloud API credentials to be configured.'),
                   ],
                 ),
               ),
@@ -125,8 +119,8 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
                 decoration: const InputDecoration(
-                  labelText: 'Phone Number',
-                  hintText: '+919207027558',
+                  labelText: 'WhatsApp Number',
+                  hintText: '+919207037558',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -136,7 +130,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 child: FilledButton(
                   onPressed: _isLoading ? null : _sendOtp,
                   style: FilledButton.styleFrom(
-                    backgroundColor: Colors.teal,
+                    backgroundColor: Colors.green.shade700,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                   child: _isLoading
@@ -148,7 +142,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                             color: Colors.white,
                           ),
                         )
-                      : const Text('Send OTP'),
+                      : const Text('Send WhatsApp OTP'),
                 ),
               ),
             ],

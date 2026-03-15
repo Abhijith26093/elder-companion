@@ -650,7 +650,7 @@ class _VitalChartWidgetState extends State<VitalChartWidget> {
                         HorizontalRangeAnnotation(
                           y1: widget.normalMin,
                           y2: widget.normalMax,
-                          color: Colors.green.withOpacity(0.12),
+                          color: Colors.green.withValues(alpha: 0.12),
                         ),
                       ],
                     )
@@ -727,7 +727,7 @@ class VitalCard extends StatelessWidget {
                 children: [
                   Icon(
                     _getIconForVital(vital.title),
-                    color: vital.color.withOpacity(0.8),
+                    color: vital.color.withValues(alpha: 0.8),
                     size: 28,
                   ),
                   const SizedBox(width: 8),
@@ -754,7 +754,7 @@ class VitalCard extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 32,
                           fontWeight: FontWeight.w900,
-                          color: vital.color.withOpacity(0.9),
+                          color: vital.color.withValues(alpha: 0.9),
                         ),
                       ),
                       TextSpan(
@@ -762,7 +762,7 @@ class VitalCard extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: vital.color.withOpacity(0.8),
+                          color: vital.color.withValues(alpha: 0.8),
                         ),
                       ),
                     ],
@@ -778,13 +778,13 @@ class VitalCard extends StatelessWidget {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: vital.color.withOpacity(0.1),
+                      color: vital.color.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
                       vital.status,
                       style: TextStyle(
-                        color: vital.color.withOpacity(0.8),
+                        color: vital.color.withValues(alpha: 0.8),
                         fontWeight: FontWeight.w600,
                         fontSize: 12,
                       ),

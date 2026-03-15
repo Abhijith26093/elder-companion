@@ -18,6 +18,8 @@ exports.triggerDistressAlert = require("./triggerDistressAlert").triggerDistress
 exports.dailyMedicationCheck = require("./dailyMedicationCheck").dailyMedicationCheck;
 exports.checkInactivity = require("./checkInactivity").checkInactivity;
 exports.triggerGeofenceAlert = require("./triggerGeofenceAlert").triggerGeofenceAlert;
+exports.authApi = require("./authApi").authApi;
+exports.notifyCaregiver = require("./notifyCaregiver").notifyCaregiver;
 
 // ============================================
 // 1. STORE CONVERSATION MEMORY

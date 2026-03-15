@@ -193,6 +193,10 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
       final profileData = {
         'uid': user.uid,
         'phoneNumber': user.phoneNumber,
+        'email': user.email,
+        'authProviderIds': user.providerData
+            .map((provider) => provider.providerId)
+            .toList(),
         'role': 'elder', // Explicitly marking as elder
         'name': _nameController.text,
         'age': int.tryParse(_ageController.text) ?? 0,
@@ -310,7 +314,7 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
 
               _buildSectionTitle('Your Interests & Abilities', Colors.blue),
               DropdownButtonFormField<String>(
-                value: _preferredLanguage,
+                initialValue: _preferredLanguage,
                 decoration: const InputDecoration(
                   labelText: 'Preferred Language',
                   border: OutlineInputBorder(),

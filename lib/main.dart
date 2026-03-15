@@ -1,70 +1,127 @@
-import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'firebase_options.dart';
-import 'auth_wrapper.dart'; // Elder login/auth screen
-import 'caregiver_dashboard.dart'; // Caregiver dashboard
-import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
+import 'login_screen.dart';
 import 'services/notification_service.dart';
 import 'services/push_notification_service.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'login_options_screen.dart';
-import 'phone_login_screen.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+const String _envAssetPath = 'assets/env/app.env';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
+  try {
+    await dotenv.load(fileName: _envAssetPath);
+  } catch (_) {}
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   debugPrint("Handling a background message: ${message.messageId}");
 }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  String? startupError;
+
+  try {
+    await dotenv.load(fileName: _envAssetPath);
+  } catch (e) {
+    startupError =
+        'Failed to load env asset at $_envAssetPath.\n$e';
+  }
+
+  if (startupError == null) {
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    } catch (e) {
+      startupError = 'Firebase initialization failed.\n$e';
+    }
+  }
+
+  if (startupError == null && !kIsWeb) {
+    try {
+      await FirebaseAppCheck.instance.activate(
+        androidProvider:
+            kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+        appleProvider: AppleProvider.appAttest,
+      );
+    } catch (e) {
+      debugPrint("Failed to initialize Firebase App Check: $e");
+    }
+  }
+
+  if (startupError == null) {
+    try {
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: true,
+        cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+      );
+    } catch (e) {
+      debugPrint("Failed to configure Firestore settings: $e");
+    }
+  }
+
+  if (startupError == null && !kIsWeb) {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  }
+
+  if (startupError != null) {
+    runApp(StartupErrorApp(message: startupError));
+    return;
+  }
+
+  runApp(const ElderlyCareApp());
+
+  unawaited(_initializeOptionalServices());
+}
+
+class StartupErrorApp extends StatelessWidget {
+  const StartupErrorApp({
+    super.key,
+    required this.message,
+  });
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        appBar: AppBar(title: const Text('Startup Error')),
+        body: Padding(
+          padding: const EdgeInsets.all(24),
+          child: SelectableText(message),
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> _initializeOptionalServices() async {
   try {
     await NotificationService().init();
   } catch (e) {
     debugPrint("Failed to initialize notifications: $e");
   }
 
-  // Load .env only for non-web
-  if (!kIsWeb) {
-    await dotenv.load(fileName: ".env");
-  }
-
-  // ✅ Platform-safe Firebase initialization
-  if (kIsWeb) {
-    await Firebase.initializeApp(options: DefaultFirebaseOptions.web);
-  } else {
-    await Firebase.initializeApp();
-  }
-
-  // ✅ App Check: use debug provider in debug mode to bypass Play Integrity
-  // This fixes invalid-recaptcha-token on Android 12+ debug builds
-  await FirebaseAppCheck.instance.activate(
-    androidProvider: kDebugMode
-        ? AndroidProvider.debug
-        : AndroidProvider.playIntegrity,
-    appleProvider: AppleProvider.appAttest,
-  );
-
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
-    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
-  );
-
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-  
   try {
     await PushNotificationService().init();
   } catch (e) {
     debugPrint("Failed to initialize push notifications: $e");
   }
-
-  runApp(const ElderlyCareApp());
 }
 
 class ElderlyCareApp extends StatelessWidget {
@@ -92,13 +149,11 @@ class ElderlyCareApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      // Landing page: choose Elder or Caregiver
       home: const RoleSelectionScreen(),
     );
   }
 }
 
-// ------------------- Role Selection Screen -------------------
 class RoleSelectionScreen extends StatelessWidget {
   const RoleSelectionScreen({super.key});
 
@@ -106,23 +161,18 @@ class RoleSelectionScreen extends StatelessWidget {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('user_role', role);
 
-    if (role == 'elder') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const LoginOptionsScreen(role: 'Elder'),
-        ),
-      );
-    } else {
-      // Caregiver goes directly to login (assuming they just login to manage)
-      // Or if you want signup for them too, use LoginOptionsScreen
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const PhoneLoginScreen(isLogin: true),
-        ),
-      );
+    final loginScreen = role == 'elder'
+        ? const LoginScreen(role: 'elder')
+        : const LoginScreen(role: 'caregiver');
+
+    if (!context.mounted) {
+      return;
     }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => loginScreen),
+    );
   }
 
   @override
@@ -130,7 +180,7 @@ class RoleSelectionScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text("Select Role")),
       body: Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -139,7 +189,6 @@ class RoleSelectionScreen extends StatelessWidget {
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 40),
-            // Elder button
             ElevatedButton.icon(
               icon: const Icon(Icons.person, size: 28),
               label: const Text("Elder", style: TextStyle(fontSize: 20)),
@@ -150,13 +199,12 @@ class RoleSelectionScreen extends StatelessWidget {
               onPressed: () => _selectRole(context, 'elder'),
             ),
             const SizedBox(height: 20),
-            // Caregiver button
             ElevatedButton.icon(
               icon: const Icon(Icons.people, size: 28),
               label: const Text("Caregiver", style: TextStyle(fontSize: 20)),
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 60),
-                backgroundColor: Colors.orangeAccent.shade700,
+                backgroundColor: Colors.orangeAccent,
               ),
               onPressed: () => _selectRole(context, 'caregiver'),
             ),

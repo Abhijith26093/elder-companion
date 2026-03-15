@@ -1,5 +1,8 @@
 # Environment files
 .env
+.firebase-config/
+.gcloud-config/
+firebase-debug.log
 
 # Flutter / Dart
 .dart_tool/
