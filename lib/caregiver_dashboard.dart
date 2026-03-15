@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 import 'medicine_reminder.dart';
 import 'alerts_screen.dart';
 import 'health_vitals_screen.dart';
@@ -207,6 +208,32 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
 
   double? _tryParseDouble(String value) {
     return double.tryParse(value.trim());
+  }
+
+  Future<Map<String, dynamic>?> _resolveLatestLocation(
+    String elderId,
+    Map<String, dynamic> elderData,
+  ) async {
+    final liveLocation = elderData['liveLocation'] as Map<String, dynamic>?;
+    if (liveLocation != null &&
+        liveLocation['latitude'] != null &&
+        liveLocation['longitude'] != null) {
+      return liveLocation;
+    }
+
+    final historySnapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(elderId)
+        .collection('location_history')
+        .orderBy('timestamp', descending: true)
+        .limit(1)
+        .get();
+
+    if (historySnapshot.docs.isEmpty) {
+      return null;
+    }
+
+    return historySnapshot.docs.first.data();
   }
 
   Color _moodColor(String? mood) {
@@ -446,7 +473,10 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
                 title: const Text('Open Current Location'),
                 onTap: () async {
                   Navigator.pop(sheetContext);
-                  final liveLocation = elderData['liveLocation'] as Map<String, dynamic>?;
+                  final liveLocation = await _resolveLatestLocation(
+                    elderId,
+                    elderData,
+                  );
                   if (liveLocation != null &&
                       liveLocation['latitude'] != null &&
                       liveLocation['longitude'] != null) {
@@ -466,7 +496,9 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('Location not available yet for $elderName.'),
+                          content: Text(
+                            'Location not available yet for $elderName. Ask them to open the app and allow location access.',
+                          ),
                         ),
                       );
                     }
@@ -959,22 +991,40 @@ class SosHistoryScreen extends StatelessWidget {
           final logs = snapshot.data!.docs;
 
           return ListView.builder(
+            padding: const EdgeInsets.all(12),
             itemCount: logs.length,
             itemBuilder: (context, index) {
               final log = logs[index].data() as Map<String, dynamic>;
               final timestamp = log['timestamp'] as Timestamp?;
-              final dateStr = timestamp != null 
-                  ? "${timestamp.toDate().toLocal().toString().split('.')[0]}" 
-                  : "Unknown Time";
-              final status = log['status'] ?? 'Unknown';
+              final dateStr = timestamp != null
+                  ? DateFormat('dd MMM yyyy, hh:mm a').format(timestamp.toDate())
+                  : 'Unknown Time';
+              final status = (log['status'] ?? 'Unknown').toString();
+              final triggeredBy = (log['triggeredBy'] ?? '').toString();
+              final resolvedBy = (log['resolvedBy'] ?? '').toString();
+              final notifiedContacts = ((log['notifiedContacts'] as List?) ?? [])
+                  .map((value) => value.toString())
+                  .where((value) => value.isNotEmpty)
+                  .toList();
+              final isResolved = status.contains('Resolved');
 
-              return ListTile(
-                leading: Icon(
-                  status.toString().contains('Resolved') ? Icons.check_circle : Icons.warning,
-                  color: status.toString().contains('Resolved') ? Colors.green : Colors.red,
+              return Card(
+                margin: const EdgeInsets.only(bottom: 10),
+                child: ListTile(
+                  leading: Icon(
+                    isResolved ? Icons.check_circle : Icons.warning,
+                    color: isResolved ? Colors.green : Colors.red,
+                  ),
+                  title: Text(status),
+                  subtitle: Text([
+                    dateStr,
+                    if (triggeredBy.isNotEmpty) 'Triggered by: $triggeredBy',
+                    if (resolvedBy.isNotEmpty) 'Resolved by: $resolvedBy',
+                    if (notifiedContacts.isNotEmpty)
+                      'SMS sent to: ${notifiedContacts.join(', ')}',
+                  ].join('\n')),
+                  isThreeLine: true,
                 ),
-                title: Text(status),
-                subtitle: Text(dateStr),
               );
             },
           );

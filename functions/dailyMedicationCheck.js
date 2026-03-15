@@ -1,5 +1,6 @@
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
+const {collectAlertRecipients, sendAlertSms} = require("./alertSms");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -57,6 +58,9 @@ exports.dailyMedicationCheck = onSchedule("every day 22:00", async () => {
       }
 
       const medicineName = medData.medicineName || "Medicine";
+      const elderDoc = await db.collection("users").doc(elderId).get();
+      const elderData = elderDoc.data() || {};
+      const elderName = elderData.name || "Elder";
 
       await db
           .collection("users")
@@ -75,6 +79,27 @@ exports.dailyMedicationCheck = onSchedule("every day 22:00", async () => {
             },
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
+
+      try {
+        const recipients = collectAlertRecipients(elderData);
+        if (recipients.length > 0) {
+          await sendAlertSms({
+            elderId,
+            elderName,
+            alertType: "medication_miss",
+            recipients,
+            messageBody:
+              `Mitra Alert: ${elderName} may have missed ${medicineName} today.`,
+            metadata: {
+              medicineId: medDoc.id,
+              medicineName,
+              date: todayStr,
+            },
+          });
+        }
+      } catch (smsError) {
+        console.error(`Failed to send medication SMS for elder ${elderId}:`, smsError);
+      }
     }
 
     console.log("dailyMedicationCheck completed");

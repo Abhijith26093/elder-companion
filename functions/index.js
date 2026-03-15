@@ -4,6 +4,7 @@ const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {onDocumentUpdated} = require("firebase-functions/v2/firestore");
 const {setGlobalOptions} = require("firebase-functions/v2");
 const admin = require("firebase-admin");
+const {collectAlertRecipients, sendAlertSms} = require("./alertSms");
 
 admin.initializeApp();
 
@@ -348,32 +349,35 @@ exports.sendSosNotification = onDocumentUpdated("users/{userId}", async (event) 
   // Only trigger if emergency state changed to TRUE
   if (!wasActive && isActive) {
     const elderName = afterData.name || "An elder";
+    const caregiverPhone = afterData.caregiverPhone || null;
     const emergencyContactPhone = afterData.emergencyContact ? afterData.emergencyContact.phone : null;
-
-    if (!emergencyContactPhone) {
-      console.log(`No emergency contact phone set for elder ${event.params.userId}. Skipping push notification.`);
-      return null;
-    }
+    const pushLookupPhone = caregiverPhone || emergencyContactPhone;
 
     try {
-      // Find the caregiver by phone number
-      const caregiversSnapshot = await db.collection("users").where("phoneNumber", "==", emergencyContactPhone).limit(1).get();
-
-      if (caregiversSnapshot.empty) {
-        console.log(`Caregiver with phone ${emergencyContactPhone} not found in database.`);
-        return null;
+      if (!pushLookupPhone) {
+        console.log(`No caregiver or emergency contact phone set for elder ${event.params.userId}.`);
       }
 
-      const caregiverData = caregiversSnapshot.docs[0].data();
-      const fcmToken = caregiverData.fcmToken;
+      const caregiversSnapshot = pushLookupPhone ?
+        await db.collection("users").where("phoneNumber", "==", pushLookupPhone).limit(1).get() :
+        null;
 
-      if (!fcmToken) {
-        console.log(`Caregiver ${caregiverData.name || emergencyContactPhone} does not have an FCM token registered.`);
-        return null;
+      if (pushLookupPhone && (caregiversSnapshot == null || caregiversSnapshot.empty)) {
+        console.log(`Caregiver with phone ${pushLookupPhone} not found in database.`);
+      }
+
+      const caregiverData = caregiversSnapshot && !caregiversSnapshot.empty ?
+        caregiversSnapshot.docs[0].data() :
+        null;
+      const fcmToken = caregiverData ? caregiverData.fcmToken : null;
+
+      if (!fcmToken && caregiverData != null) {
+        console.log(`Caregiver ${caregiverData.name || pushLookupPhone} does not have an FCM token registered.`);
       }
 
       // Send the Push Notification
-      const payload = {
+      if (fcmToken) {
+        const payload = {
         token: fcmToken,
         notification: {
           title: "🚨 ACTIVE EMERGENCY! 🚨",
@@ -400,11 +404,48 @@ exports.sendSosNotification = onDocumentUpdated("users/{userId}", async (event) 
         }
       };
 
-      const response = await admin.messaging().send(payload);
-      console.log("Successfully sent SOS push notification:", response);
+        const response = await admin.messaging().send(payload);
+        console.log("Successfully sent SOS push notification:", response);
+      }
+      try {
+        const recipients = collectAlertRecipients(afterData);
+        if (recipients.length > 0) {
+          await sendAlertSms({
+            elderId: event.params.userId,
+            elderName,
+            alertType: "sos",
+            recipients,
+            messageBody: `Mitra Alert: ${elderName} triggered SOS and needs immediate assistance.`,
+            metadata: {
+              caregiverPhone,
+              emergencyContactPhone,
+            },
+          });
+        }
+      } catch (smsError) {
+        console.error("Error sending SOS SMS notification:", smsError);
+      }
       return null;
     } catch (error) {
       console.error("Error sending SOS push notification:", error);
+      try {
+        const recipients = collectAlertRecipients(afterData);
+        if (recipients.length > 0) {
+          await sendAlertSms({
+            elderId: event.params.userId,
+            elderName,
+            alertType: "sos",
+            recipients,
+            messageBody: `Mitra Alert: ${elderName} triggered SOS and needs immediate assistance.`,
+            metadata: {
+              caregiverPhone,
+              emergencyContactPhone,
+            },
+          });
+        }
+      } catch (smsError) {
+        console.error("Error sending fallback SOS SMS notification:", smsError);
+      }
       return null;
     }
   }

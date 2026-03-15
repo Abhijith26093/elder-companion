@@ -1,5 +1,6 @@
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
+const {collectAlertRecipients, sendAlertSms} = require("./alertSms");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -108,6 +109,26 @@ exports.triggerDistressAlert = onCall(async (request) => {
     });
   } catch (error) {
     console.error("Failed to send distress push:", error);
+  }
+
+  try {
+    const recipients = collectAlertRecipients(elderData);
+    if (recipients.length > 0) {
+      await sendAlertSms({
+        elderId: uid,
+        elderName,
+        alertType: "distress",
+        recipients,
+        messageBody:
+          `Mitra Alert: ${elderName} may need assistance. Distress detected: ${keyword}.`,
+        metadata: {
+          severity: normalizedSeverity,
+          keyword: String(keyword).toLowerCase(),
+        },
+      });
+    }
+  } catch (smsError) {
+    console.error("Failed to send distress SMS:", smsError);
   }
 
   return {success: true, pushSent: true};

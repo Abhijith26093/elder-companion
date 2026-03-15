@@ -57,6 +57,94 @@ class ChatSummariesScreen extends StatelessWidget {
     return '${hours}h ${remainingMins}m';
   }
 
+  Widget _buildFallbackMemories() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(elderId)
+          .collection('memory_entries')
+          .orderBy('timestamp', descending: true)
+          .limit(12)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Text('Failed to load fallback summaries: ${snapshot.error}'),
+          );
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'No chat summaries yet. Once the elder chats with Mitra, a summary will appear here automatically.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+            ),
+          );
+        }
+
+        final docs = snapshot.data!.docs;
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(12),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data() as Map<String, dynamic>;
+            final timestamp = data['timestamp'] as Timestamp?;
+            final userMessage = (data['userMessage'] ?? '').toString().trim();
+            final aiResponse = (data['aiResponse'] ?? '').toString().trim();
+            final dateLabel = timestamp != null
+                ? DateFormat('dd MMM yyyy, hh:mm a').format(timestamp.toDate())
+                : 'Unknown date';
+
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      dateLabel,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      userMessage.isEmpty
+                          ? 'The elder had a brief conversation with Mitra.'
+                          : 'Recent topic: $userMessage',
+                      style: const TextStyle(fontSize: 15, height: 1.35),
+                    ),
+                    if (aiResponse.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Mitra response: $aiResponse',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -81,12 +169,7 @@ class ChatSummariesScreen extends StatelessWidget {
           }
 
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(
-              child: Text(
-                'No chat summaries available yet.',
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-            );
+            return _buildFallbackMemories();
           }
 
           final docs = snapshot.data!.docs;

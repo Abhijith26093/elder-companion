@@ -30,7 +30,7 @@ class _CaregiverNotesScreenState extends State<CaregiverNotesScreen> {
           maxLines: 5,
           minLines: 3,
           decoration: const InputDecoration(
-            hintText: 'Write context about this elder…',
+            hintText: 'Write context about this elder...',
             border: OutlineInputBorder(),
           ),
         ),
@@ -88,71 +88,102 @@ class _CaregiverNotesScreenState extends State<CaregiverNotesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('${widget.elderName} • Caregiver Notes'),
+        title: Text('${widget.elderName} - Caregiver Notes'),
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('users')
-            .doc(widget.elderId)
-            .collection('caregiver_notes')
-            .orderBy('createdAt', descending: true)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.amber.shade200),
+            ),
+            child: const Text(
+              'Active caregiver notes become trusted context for Mitra. Use them for routines, preferences, calming cues, safety issues, or memory reminders so chats and alerts stay personalized.',
+              style: TextStyle(height: 1.35),
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(widget.elderId)
+                  .collection('caregiver_notes')
+                  .orderBy('createdAt', descending: true)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-          if (snapshot.hasError) {
-            return Center(child: Text('Failed to load notes: ${snapshot.error}'));
-          }
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text('Failed to load notes: ${snapshot.error}'),
+                  );
+                }
 
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(
-              child: Text(
-                'No caregiver notes yet.',
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-            );
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: snapshot.data!.docs.length,
-            itemBuilder: (context, index) {
-              final doc = snapshot.data!.docs[index];
-              final data = doc.data() as Map<String, dynamic>;
-              final text = (data['text'] ?? '').toString();
-              final active = data['active'] == true;
-              final createdAt = data['createdAt'] as Timestamp?;
-              final when = createdAt != null
-                  ? DateFormat('dd MMM yyyy, hh:mm a').format(createdAt.toDate())
-                  : 'Unknown date';
-
-              return Dismissible(
-                key: ValueKey(doc.id),
-                direction: DismissDirection.endToStart,
-                background: Container(
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  color: Colors.red,
-                  child: const Icon(Icons.delete, color: Colors.white),
-                ),
-                onDismissed: (_) => _deleteNote(doc.id),
-                child: Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    title: Text(text),
-                    subtitle: Text(when),
-                    trailing: Switch(
-                      value: active,
-                      onChanged: (_) => _toggleActive(doc.id, active),
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        'No caregiver notes yet.\n\nAdd notes here to guide Mitra with family context, health patterns, routines, and calming cues.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 16, color: Colors.grey),
+                      ),
                     ),
-                  ),
-                ),
-              );
-            },
-          );
-        },
+                  );
+                }
+
+                return ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: snapshot.data!.docs.length,
+                  itemBuilder: (context, index) {
+                    final doc = snapshot.data!.docs[index];
+                    final data = doc.data() as Map<String, dynamic>;
+                    final text = (data['text'] ?? '').toString();
+                    final active = data['active'] == true;
+                    final createdAt = data['createdAt'] as Timestamp?;
+                    final when = createdAt != null
+                        ? DateFormat(
+                            'dd MMM yyyy, hh:mm a',
+                          ).format(createdAt.toDate())
+                        : 'Unknown date';
+
+                    return Dismissible(
+                      key: ValueKey(doc.id),
+                      direction: DismissDirection.endToStart,
+                      background: Container(
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        color: Colors.red,
+                        child: const Icon(Icons.delete, color: Colors.white),
+                      ),
+                      onDismissed: (_) => _deleteNote(doc.id),
+                      child: Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          title: Text(text),
+                          subtitle: Text(
+                            '$when\n${active ? "Active in Mitra context" : "Saved but inactive"}',
+                          ),
+                          trailing: Switch(
+                            value: active,
+                            onChanged: (_) => _toggleActive(doc.id, active),
+                          ),
+                          isThreeLine: true,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _addNote,

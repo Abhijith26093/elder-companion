@@ -33,6 +33,78 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
   bool _isFetching = true; // Added to show loading while fetching data
   String _preferredLanguage = 'auto';
 
+  String? _normalizePhone(String? value) {
+    final input = (value ?? '').trim();
+    final digits = input.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return null;
+    if (input.startsWith('+') && digits.length >= 10 && digits.length <= 15) {
+      return '+$digits';
+    }
+    if (digits.length == 10) {
+      return '+91$digits';
+    }
+    if (digits.length >= 11 && digits.length <= 15) {
+      return '+$digits';
+    }
+    return null;
+  }
+
+  String _displayPhone(String? value) {
+    final normalized = _normalizePhone(value);
+    if (normalized == null) {
+      return (value ?? '').trim();
+    }
+    return normalized.startsWith('+91') && normalized.length == 13
+        ? normalized.substring(3)
+        : normalized;
+  }
+
+  Future<void> _syncEmergencyContactCollection({
+    required String uid,
+    required String name,
+    required String phone,
+  }) async {
+    final contactsRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('emergency_contacts');
+
+    final existingPrimary = await contactsRef
+        .where('isPrimary', isEqualTo: true)
+        .limit(1)
+        .get();
+
+    if (existingPrimary.docs.isNotEmpty) {
+      await existingPrimary.docs.first.reference.set({
+        'name': name,
+        'phoneNumber': phone,
+        'isPrimary': true,
+      }, SetOptions(merge: true));
+      return;
+    }
+
+    final matchingPhone = await contactsRef
+        .where('phoneNumber', isEqualTo: phone)
+        .limit(1)
+        .get();
+
+    if (matchingPhone.docs.isNotEmpty) {
+      await matchingPhone.docs.first.reference.set({
+        'name': name,
+        'phoneNumber': phone,
+        'isPrimary': true,
+      }, SetOptions(merge: true));
+      return;
+    }
+
+    await contactsRef.add({
+      'name': name,
+      'phoneNumber': phone,
+      'createdAt': FieldValue.serverTimestamp(),
+      'isPrimary': true,
+    });
+  }
+
   String _generateInviteCode({int length = 6}) {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     final random = Random.secure();
@@ -118,15 +190,14 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
           _caregiverNameController.text = data['caregiverName'] ?? '';
           
           // Remove the +91 prefix for the UI if it exists, since the UI expects 10 digits
-          String cgPhone = data['caregiverPhone'] ?? '';
-          if (cgPhone.startsWith('+91')) {
-            cgPhone = cgPhone.substring(3);
-          }
-          _caregiverPhoneController.text = cgPhone;
+          _caregiverPhoneController.text =
+              _displayPhone(data['caregiverPhone']?.toString());
 
           if (data['emergencyContact'] != null) {
             _emergencyNameController.text = data['emergencyContact']['name'] ?? '';
-            _emergencyPhoneController.text = data['emergencyContact']['phone'] ?? '';
+            _emergencyPhoneController.text = _displayPhone(
+              data['emergencyContact']['phone']?.toString(),
+            );
           }
 
           _hobbiesController.text = data['hobbies'] ?? '';
@@ -189,6 +260,15 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
     });
 
     try {
+      final caregiverPhone = _normalizePhone(_caregiverPhoneController.text);
+      final emergencyPhone = _normalizePhone(_emergencyPhoneController.text);
+
+      if (caregiverPhone == null || emergencyPhone == null) {
+        throw Exception(
+          'Enter valid caregiver and emergency phone numbers with country code or 10 digits.',
+        );
+      }
+
       // Data to be saved
       final profileData = {
         'uid': user.uid,
@@ -200,12 +280,11 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
         'role': 'elder', // Explicitly marking as elder
         'name': _nameController.text,
         'age': int.tryParse(_ageController.text) ?? 0,
-        'caregiverName': _caregiverNameController.text,
-        'caregiverPhone':
-            '+91${_caregiverPhoneController.text.trim()}', // Standardize format for matching
+        'caregiverName': _caregiverNameController.text.trim(),
+        'caregiverPhone': caregiverPhone,
         'emergencyContact': {
-          'name': _emergencyNameController.text,
-          'phone': _emergencyPhoneController.text,
+          'name': _emergencyNameController.text.trim(),
+          'phone': emergencyPhone,
         },
         'interests': _interestsController.text,
         'hobbies': _hobbiesController.text,
@@ -219,6 +298,12 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
           .collection('users')
           .doc(user.uid)
           .set(profileData);
+
+      await _syncEmergencyContactCollection(
+        uid: user.uid,
+        name: _emergencyNameController.text.trim(),
+        phone: emergencyPhone,
+      );
 
       // Navigate to home screen and remove all previous routes
       Navigator.of(context).pushAndRemoveUntil(
