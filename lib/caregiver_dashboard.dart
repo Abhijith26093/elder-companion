@@ -375,14 +375,18 @@ class _CaregiverDashboardState extends State<CaregiverDashboard> {
                                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
                                   ),
                                 ),
-                                ElevatedButton(
-                                  onPressed: () => _resolveEmergency(elderId),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.white,
-                                    foregroundColor: Colors.red,
-                                  ),
-                                  child: const Text('Resolve'),
-                                )
+                                 GestureDetector(
+                                   onTap: () => _resolveEmergency(elderId),
+                                   behavior: HitTestBehavior.opaque,
+                                   child: ElevatedButton(
+                                     onPressed: () => _resolveEmergency(elderId),
+                                     style: ElevatedButton.styleFrom(
+                                       backgroundColor: Colors.white,
+                                       foregroundColor: Colors.red,
+                                     ),
+                                     child: const Text('Resolve'),
+                                   ),
+                                 )
                               ],
                             ),
                           ),

@@ -22,7 +22,8 @@ service cloud.firestore {
           'caregiverPhone',
           'caregiverUid',
           'pendingInviteCode',
-          'inviteCodeExpiresAt'
+          'inviteCodeExpiresAt',
+          'emergencyState'
         ]);
     }
 
@@ -31,7 +32,8 @@ service cloud.firestore {
       allow create, delete: if signedIn() && request.auth.uid == userId;
       allow update: if signedIn() && (
         request.auth.uid == userId ||
-        isCaregiverLinkFieldUpdate()
+        isCaregiverLinkFieldUpdate() ||
+        isElderOrCaregiver(userId)
       );
 
       match /memory_entries/{memoryId} {
@@ -61,7 +63,7 @@ service cloud.firestore {
 
       match /alerts/{alertId} {
         allow read: if signedIn();
-        allow write: if signedIn() && request.auth.uid == userId;
+        allow write: if signedIn() && isElderOrCaregiver(userId);
       }
 
       match /mood_logs/{moodLogId} {
@@ -85,7 +87,7 @@ service cloud.firestore {
 
       match /sos_history/{sosId} {
         allow read: if signedIn();
-        allow write: if signedIn() && request.auth.uid == userId;
+        allow write: if signedIn() && isElderOrCaregiver(userId);
       }
     }
 
