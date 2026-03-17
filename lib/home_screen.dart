@@ -51,7 +51,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  String? _emergencyContactName;
   String? _emergencyContactPhone;
   String? _userName;
   Map<String, dynamic>? _userProfile;
@@ -202,7 +201,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
 
       final rootEmergency = data?['emergencyContact'] as Map<String, dynamic>?;
-      String? emergencyName = rootEmergency?['name']?.toString();
       String? emergencyPhone = _normalizePhone(rootEmergency?['phone']?.toString());
 
       if ((emergencyPhone == null || emergencyPhone.isEmpty) && data != null) {
@@ -210,7 +208,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           user.uid,
         );
         if (fallbackContact != null) {
-          emergencyName = fallbackContact['name'];
           emergencyPhone = fallbackContact['phone'];
           data['emergencyContact'] = fallbackContact;
           await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
@@ -222,7 +219,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _userProfile = data;
         _userName = data?['name'];
-        _emergencyContactName = emergencyName;
         _emergencyContactPhone = emergencyPhone;
       });
 
@@ -237,8 +233,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             setState(() {
               _userProfile = data;
               _userName = data['name'];
-              _emergencyContactName =
-                  data['emergencyContact']?['name']?.toString();
               _emergencyContactPhone = _normalizePhone(
                 data['emergencyContact']?['phone']?.toString(),
               );
@@ -395,11 +389,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (caregiverPhone != null && caregiverPhone.isNotEmpty) caregiverPhone,
     }.toList();
 
-    // Guarantee at least one recipient so the SOS history logic always triggers
-    if (recipients.isEmpty) {
-      recipients.add("Caregiver (Not Linked)");
-    }
-
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -457,9 +446,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'Emergency alert sent. Mitra is notifying ${recipients.length} contact${recipients.length == 1 ? '' : 's'} by SMS.',
-            ),
+            content: Text('Emergency alert sent.'),
             backgroundColor: Colors.green,
           ),
         );
@@ -663,12 +650,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       default:
         break;
     }
-  }
-
-  void _showComingSoon(String feature) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('$feature coming soon')));
   }
 
   // --- Feature List ---
